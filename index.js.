@@ -1,0 +1,91 @@
+const {
+    default: makeWASocket,
+    useMultiFileAuthState,
+    DisconnectReason,
+    fetchLatestBaileysVersion
+} = require("@whiskeysockets/baileys");
+
+const pino = require("pino");
+const qrcode = require("qrcode-terminal");
+
+async function startBot() {
+    const { state, saveCreds } =
+        await useMultiFileAuthState("./session");
+
+    const { version } =
+        await fetchLatestBaileysVersion();
+
+    const sock = makeWASocket({
+        version,
+        auth: state,
+        logger: pino({ level: "silent" }),
+        browser: ["ACE D MD", "Chrome", "1.0.0"]
+    });
+
+    sock.ev.on("creds.update", saveCreds);
+
+    sock.ev.on("connection.update", ({ connection, lastDisconnect, qr }) => {
+        if (qr) {
+            qrcode.generate(qr, { small: true });
+        }
+
+        if (connection === "open") {
+            console.log("ACE D MD CONNECTED!");
+        }
+
+        if (connection === "close") {
+            const status = lastDisconnect?.error?.output?.statusCode;
+
+            if (status !== DisconnectReason.loggedOut) {
+                startBot();
+            } else {
+                console.log("WhatsApp logged out. Reconnect required.");
+            }
+        }
+    });
+
+    sock.ev.on("messages.upsert", async ({ messages }) => {
+        const msg = messages[0];
+
+        if (!msg.message || msg.key.fromMe) return;
+
+        const from = msg.key.remoteJid;
+        const text =
+            msg.message.conversation ||
+            msg.message.extendedTextMessage?.text ||
+            "";
+
+        const command = text.trim().toLowerCase();
+
+        if (command === ".ping") {
+            await sock.sendMessage(from, {
+                text: "Pong! ACE D MD is online! 🏓"
+            });
+        }
+
+        if (command === ".menu") {
+            await sock.sendMessage(from, {
+                text: `╭━━━『 ACE D MD 』━━━
+┃ .ping
+┃ .menu
+┃ .owner
+┃ .about
+╰━━━━━━━━━━━━━━`
+            });
+        }
+
+        if (command === ".owner") {
+            await sock.sendMessage(from, {
+                text: "ACE D MD Owner"
+            });
+        }
+
+        if (command === ".about") {
+            await sock.sendMessage(from, {
+                text: "ACE D MD - Powered by Baileys."
+            });
+        }
+    });
+}
+
+startBot().catch(console.error);
