@@ -6,14 +6,14 @@ const {
 } = require("@whiskeysockets/baileys");
 
 const pino = require("pino");
-const qrcode = require("qrcode-terminal");
+
+const PHONE_NUMBER = "254797555742";
 
 async function startBot() {
     const { state, saveCreds } =
         await useMultiFileAuthState("./session");
 
-    const { version } =
-        await fetchLatestBaileysVersion();
+    const { version } = await fetchLatestBaileysVersion();
 
     const sock = makeWASocket({
         version,
@@ -24,22 +24,26 @@ async function startBot() {
 
     sock.ev.on("creds.update", saveCreds);
 
-    sock.ev.on("connection.update", ({ connection, lastDisconnect, qr }) => {
-        if (qr) {
-            qrcode.generate(qr, { small: true });
-        }
+    if (!state.creds.registered) {
+        const code = await sock.requestPairingCode(PHONE_NUMBER);
+        console.log("ACE D MD PAIRING CODE:", code);
+    }
+
+    sock.ev.on("connection.update", ({ connection, lastDisconnect }) => {
 
         if (connection === "open") {
-            console.log("ACE D MD CONNECTED!");
+            console.log("ACE D MD CONNECTED SUCCESSFULLY!");
         }
 
         if (connection === "close") {
-            const status = lastDisconnect?.error?.output?.statusCode;
+            const status =
+                lastDisconnect?.error?.output?.statusCode;
 
             if (status !== DisconnectReason.loggedOut) {
+                console.log("Reconnecting...");
                 startBot();
             } else {
-                console.log("WhatsApp logged out. Reconnect required.");
+                console.log("Session logged out. Pair again.");
             }
         }
     });
@@ -50,6 +54,7 @@ async function startBot() {
         if (!msg.message || msg.key.fromMe) return;
 
         const from = msg.key.remoteJid;
+
         const text =
             msg.message.conversation ||
             msg.message.extendedTextMessage?.text ||
@@ -66,10 +71,12 @@ async function startBot() {
         if (command === ".menu") {
             await sock.sendMessage(from, {
                 text: `╭━━━『 ACE D MD 』━━━
+┃
 ┃ .ping
 ┃ .menu
 ┃ .owner
 ┃ .about
+┃
 ╰━━━━━━━━━━━━━━`
             });
         }
