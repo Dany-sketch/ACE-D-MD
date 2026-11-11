@@ -1,0 +1,14 @@
+{
+  "name": "ace-d-md",
+  "version": "1.0.0",
+  "description": "ACE D MD WhatsApp Bot",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "latest",
+    "pino": "latest",
+    "qrcode-terminal": "latest"
+  }
+}
