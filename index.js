@@ -2,130 +2,139 @@ const {
     default: makeWASocket,
     useMultiFileAuthState,
     DisconnectReason,
-    fetchLatestBaileysVersion
+    Browsers
 } = require("@whiskeysockets/baileys");
 
-const express = require("express");
 const pino = require("pino");
+const express = require("express");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
 app.get("/", (req, res) => {
     res.send("ACE D MD is running!");
 });
 
 app.get("/health", (req, res) => {
-    res.json({
-        bot: "ACE D MD",
-        status: "running"
-    });
+    res.send("OK");
 });
 
 app.listen(PORT, () => {
-    console.log("ACE D MD server running on port " + PORT);
+    console.log(`ACE D MD server running on port ${PORT}`);
 });
 
-const PHONE_NUMBER = "254797555742";
+let isStarting = false;
 
 async function startBot() {
+    if (isStarting) return;
+    isStarting = true;
 
-    const { state, saveCreds } =
-        await useMultiFileAuthState("./session");
+    try {
+        const { state, saveCreds } =
+            await useMultiFileAuthState("./session");
 
-    const { version } =
-        await fetchLatestBaileysVersion();
+        const sock = makeWASocket({
+            auth: state,
+            logger: pino({ level: "silent" }),
+            browser: Browsers.macOS("Desktop"),
+            markOnlineOnConnect: false
+        });
 
-    const sock = makeWASocket({
-        version,
-        auth: state,
-        logger: pino({ level: "silent" }),
-        browser: ["ACE D MD", "Chrome", "1.0.0"]
-    });
+        let pairingRequested = false;
 
-    sock.ev.on("creds.update", saveCreds);
+        sock.ev.on("creds.update", saveCreds);
 
-    sock.ev.on("connection.update", async (update) => {
+        sock.ev.on("connection.update", async (update) => {
+            const { connection, lastDisconnect, qr } = update;
 
-        const { connection, lastDisconnect } = update;
+            if (qr && !sock.authState.creds.registered && !pairingRequested) {
+                pairingRequested = true;
 
-        if (connection === "open") {
-            console.log("ACE D MD CONNECTED!");
-        }
+                try {
+                    const number = process.env.PHONE_NUMBER;
 
-        if (connection === "close") {
+                    if (!number || !/^\d+$/.test(number)) {
+                        console.log("ERROR: Check your PHONE_NUMBER environment variable.");
+                        return;
+                    }
 
-            const status =
-                lastDisconnect?.error?.output?.statusCode;
-
-            if (status !== DisconnectReason.loggedOut) {
-                console.log("Reconnecting...");
-                setTimeout(startBot, 5000);
-            } else {
-                console.log("WhatsApp logged out.");
+                    const code = await sock.requestPairingCode(number);
+                    console.log("ACE D MD PAIR CODE:", code);
+                } catch (error) {
+                    console.log("Pairing error:", error.message);
+                }
             }
-        }
-    });
 
-    if (!state.creds.registered) {
-        setTimeout(async () => {
-            try {
-                const code =
-                    await sock.requestPairingCode(PHONE_NUMBER);
-
-                console.log("ACE D MD PAIR CODE:", code);
-            } catch (error) {
-                console.log("Pairing error:", error.message);
+            if (connection === "open") {
+                console.log("ACE D MD connected to WhatsApp!");
+                isStarting = false;
             }
-        }, 3000);
+
+            if (connection === "close") {
+                isStarting = false;
+
+                const statusCode =
+                    lastDisconnect?.error?.output?.statusCode;
+
+                if (statusCode === DisconnectReason.loggedOut) {
+                    console.log("WhatsApp logged out. Please link again.");
+                } else {
+                    console.log("Connection closed. Reconnecting...");
+                    setTimeout(startBot, 5000);
+                }
+            }
+        });
+
+        sock.ev.on("messages.upsert", async ({ messages }) => {
+            for (const msg of messages) {
+                if (!msg.message || msg.key.fromMe) continue;
+
+                const jid = msg.key.remoteJid;
+
+                const text =
+                    msg.message.conversation ||
+                    msg.message.extendedTextMessage?.text ||
+                    "";
+
+                const command = text.trim().toLowerCase();
+
+                if (command === ".ping") {
+                    await sock.sendMessage(jid, {
+                        text: "Pong! ACE D MD is online."
+                    });
+                }
+
+                if (command === ".menu") {
+                    await sock.sendMessage(jid, {
+                        text:
+                            "╭━━━〔 ACE D MD 〕━━━╮\n" +
+                            "┃ .ping\n" +
+                            "┃ .menu\n" +
+                            "┃ .owner\n" +
+                            "┃ .about\n" +
+                            "╰━━━━━━━━━━━━━━━━╯"
+                    });
+                }
+
+                if (command === ".owner") {
+                    await sock.sendMessage(jid, {
+                        text: "ACE D MD Bot Owner"
+                    });
+                }
+
+                if (command === ".about") {
+                    await sock.sendMessage(jid, {
+                        text: "ACE D MD WhatsApp Bot\nPowered by Baileys."
+                    });
+                }
+            }
+        });
+
+    } catch (error) {
+        isStarting = false;
+        console.log("Bot startup error:", error.message);
+        setTimeout(startBot, 10000);
     }
-
-    sock.ev.on("messages.upsert", async ({ messages }) => {
-
-        const msg = messages[0];
-
-        if (!msg.message || msg.key.fromMe) return;
-
-        const from = msg.key.remoteJid;
-
-        const text =
-            msg.message.conversation ||
-            msg.message.extendedTextMessage?.text ||
-            "";
-
-        const command = text.trim().toLowerCase();
-
-        if (command === ".ping") {
-            await sock.sendMessage(from, {
-                text: "Pong! ACE D MD is online! 🏓"
-            });
-        }
-
-        if (command === ".menu") {
-            await sock.sendMessage(from, {
-                text: `╭━━━『 ACE D MD 』━━━
-┃
-┃ .ping
-┃ .menu
-┃ .owner
-┃ .about
-┃
-╰━━━━━━━━━━━━━━`
-            });
-        }
-
-        if (command === ".owner") {
-            await sock.sendMessage(from, {
-                text: "ACE D MD Owner"
-            });
-        }
-
-        if (command === ".about") {
-            await sock.sendMessage(from, {
-                text: "ACE D MD powered by Baileys."
-            });
-        }
-    });
 }
 
-startBot().catch(console.error);
+startBot();
